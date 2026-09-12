@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xrobotoolkit_teleop"
+version = "1.0.3"
+description = "Teleoperation demo with MuJoCo and UR5 robot"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Zhigen", email = "zhaozhigen@gmail.com"}
+]
+dependencies = [
+    "mujoco",
+    "numpy",
+    "meshcat",
+    "placo",
+    "ur_rtde",
+    "dynamixel-sdk",
+    "rospkg",
+    "torch",
+    "dex_retargeting",
+    "pyrealsense2",
+    "opencv-python",
+    "tyro",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+]
+
+[tool.setuptools]
+packages = ["xrobotoolkit_teleop"]
+
+[tool.setuptools.package-data]
+xrobotoolkit_teleop = ["../assets/**/*"]
+
+[tool.black]
+line-length = 120
