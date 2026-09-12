@@ -4,26 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xrobotoolkit_teleop"
-version = "1.0.3"
-description = "Teleoperation demo with MuJoCo and UR5 robot"
+version = "2.0.0"
+description = "XR teleoperation of a dual-arm JAKA K1 with a CasADi/IPOPT inverse kinematics solver"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "Zhigen", email = "zhaozhigen@gmail.com"}
 ]
+# pinocchio is deliberately NOT listed here: the CasADi IK needs the conda-forge build
+# (pinocchio 3.1.0 + eigenpy) that ships the SX-only `pinocchio.casadi` bindings. The
+# PyPI sdist does not. setup_conda.sh installs it from conda-forge.
 dependencies = [
-    "mujoco",
+    "casadi>=3.6",
     "numpy",
     "meshcat",
-    "placo",
-    "ur_rtde",
-    "dynamixel-sdk",
-    "rospkg",
-    "torch",
-    "dex_retargeting",
-    "pyrealsense2",
-    "opencv-python",
     "tyro",
 ]
 
@@ -32,8 +27,8 @@ dev = [
     "black",
 ]
 
-[tool.setuptools]
-packages = ["xrobotoolkit_teleop"]
+[tool.setuptools.packages.find]
+include = ["xrobotoolkit_teleop*"]
 
 [tool.setuptools.package-data]
 xrobotoolkit_teleop = ["../assets/**/*"]

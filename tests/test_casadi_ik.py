@@ -154,9 +154,9 @@ class IkSolveTest(unittest.TestCase):
     def test_a_small_target_step_moves_the_joints_less_than_a_degree(self):
         """A 5 mm target step costs <1 deg of joint motion, whatever the loop rate is.
 
-        The placo path closed the same step inside one dt, which turned position error into
-        a velocity command (~26000 deg/s peak for a 10 mm step). Here the per-cycle joint
-        move is bounded by the smooth cost, so joint rate follows target rate instead.
+        Closing the same step inside one dt would turn position error into a velocity
+        command (~26000 deg/s peak for a 10 mm step). Here the per-cycle joint move is
+        bounded by the smooth cost, so joint rate follows target rate instead.
         """
         _, q = self._solve_from_home(_shift(self.home_left, [0.005, 0.0, 0.0]), self.home_right)
         self.assertLess(float(np.degrees(np.abs(q - JAKA_K1_Q_INIT).max())), 1.0)
@@ -271,9 +271,6 @@ class _StubXrClient:
     def get_key_value_by_name(self, name):
         return self.grip if name.endswith("grip") else 0.0
 
-    def get_motion_tracker_data(self):
-        return None
-
     def get_pose_by_name(self, name):
         return np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])  # identity orientation
 
@@ -306,7 +303,7 @@ class ControllerOfflineTest(unittest.TestCase):
         for side, name in (("left", "left_hand"), ("right", "right_hand")):
             config = ctrl.manipulator_config[name]
             shoulder_robot = np.array(ctrl._get_link_pose(config["swgr"]["shoulder_link"])[0])
-            home = ctrl.placo_robot.frame(config["link_name"])[:3, 3]
+            home = ctrl.kinematics.frame(config["link_name"])[:3, 3]
             stub.hands[side] = stub.SHOULDERS[side] + ctrl.R_headset_world.T @ (
                 (home - shoulder_robot) / ctrl.swgr_scale[name]
             )
@@ -317,15 +314,15 @@ class ControllerOfflineTest(unittest.TestCase):
         for _ in range(10):  # engaged, settled on the calibrated target
             ctrl._update_ik()
         stub.grip = 0.0
-        for _ in range(3):  # released: target holds, ref_tracker_xyz is NOT reset
+        for _ in range(3):  # released: target holds its last absolute value, no re-anchoring
             ctrl._update_ik()
         stub.wrist_offset = np.array([0.06, 0.0, 0.0])  # operator moved while released
         stub.grip = 1.0
         peak = 0.0
         for _ in range(cycles):
-            q_before = ctrl.placo_robot.state.q.copy()
+            q_before = ctrl.kinematics.state.q.copy()
             ctrl._update_ik()
-            peak = max(peak, float(np.degrees(np.abs(ctrl.placo_robot.state.q - q_before).max())))
+            peak = max(peak, float(np.degrees(np.abs(ctrl.kinematics.state.q - q_before).max())))
         return peak
 
     def test_engage_ramp_caps_the_reattach_jump(self):
@@ -348,7 +345,7 @@ class ControllerOfflineTest(unittest.TestCase):
             ctrl._update_ik()
         for name, config in ctrl.manipulator_config.items():
             target = ctrl._task_target(name)
-            actual = ctrl.placo_robot.frame(config["link_name"])
+            actual = ctrl.kinematics.frame(config["link_name"])
             self.assertLess(
                 float(np.linalg.norm(actual[:3, 3] - target[:3, 3])), 0.02, f"{name} did not converge"
             )

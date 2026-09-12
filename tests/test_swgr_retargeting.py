@@ -91,7 +91,7 @@ class SwgrRetargetingTest(unittest.TestCase):
             atol=1e-12,
         )
 
-    def test_scale_factor_is_reach_ratio(self):
+    def test_swgr_scale_is_reach_ratio(self):
         """The single SWGR scale factor is robot_reach / human_reach, not a tuned gain."""
         self.assertAlmostEqual(SCALE, 0.768 / 0.58, places=6)
         for name, config in JAKA_K1_MANIPULATOR_CONFIG.items():
@@ -145,6 +145,12 @@ class _BareController(BaseTeleopController):
     def _robot_setup(self):
         pass
 
+    def _solver_setup(self):
+        pass
+
+    def _solve_ik(self):
+        pass
+
     def _update_robot_state(self):
         pass
 
@@ -163,7 +169,6 @@ class SwgrControllerPathTest(unittest.TestCase):
 
     LEFT_CONFIG = JAKA_K1_MANIPULATOR_CONFIG["left_hand"]
     REF_XYZ = np.array([0.30, 0.70, 0.40])
-    REF_QUAT = np.array([1.0, 0.0, 0.0, 0.0])
     LIMBS = {
         "left": {
             "shoulder": np.array([0.05, 0.18, 1.35]),
@@ -182,7 +187,6 @@ class SwgrControllerPathTest(unittest.TestCase):
         ctrl.swgr_rot_offset = {"left_hand": np.eye(3)}
         ctrl.swgr_elbow = {}
         ctrl.ref_ee_xyz = {"left_hand": self.REF_XYZ.copy()}
-        ctrl.ref_ee_quat = {"left_hand": self.REF_QUAT.copy()}
         ctrl.effector_control_mode = {"left_hand": "pose"}
         ctrl.effector_task = {"left_hand": _Task()}
         ctrl.xr_client = _StubXrClient(controller_pose)

@@ -103,30 +103,6 @@ class XrClient:
         else:
             raise ValueError(f"Invalid controller: {controller}. Valid controllers are: 'left', 'right'.")
 
-    def get_motion_tracker_data(self) -> dict:
-        """Returns a dictionary of motion tracker data, where the keys are the tracker serial numbers.
-        Each value is a dictionary containing the pose, velocity, and acceleration of the tracker.
-        """
-        num_motion_data = xrt.num_motion_data_available()
-        if num_motion_data == 0:
-            return {}
-
-        poses = xrt.get_motion_tracker_pose()
-        velocities = xrt.get_motion_tracker_velocity()
-        accelerations = xrt.get_motion_tracker_acceleration()
-        serial_numbers = xrt.get_motion_tracker_serial_numbers()
-
-        tracker_data = {}
-        for i in range(num_motion_data):
-            serial = serial_numbers[i]
-            tracker_data[serial] = {
-                "pose": poses[i],
-                "velocity": velocities[i],
-                "acceleration": accelerations[i],
-            }
-
-        return tracker_data
-
     def get_body_tracking_data(self) -> dict | None:
         """Returns body joint poses, or None if unavailable.
 

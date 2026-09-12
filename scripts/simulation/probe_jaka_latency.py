@@ -50,7 +50,6 @@ XR_METHODS = (
     "get_body_tracking_data",
     "get_key_value_by_name",
     "get_pose_by_name",
-    "get_motion_tracker_data",
 )
 STAGES = ("_update_ik", "_solve_ik", "_send_command", "_update_viz", "_read_body_upper_limbs")
 

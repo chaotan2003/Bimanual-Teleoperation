@@ -1,10 +1,9 @@
 """CasADi/IPOPT teleoperation controller for simulation (meshcat visualization only).
 
-Same XR input path and same SWGR retargeting as :class:`PlacoTeleopController`: the
-base controller still writes a 4x4 world target per manipulator, and this class only
-replaces what happens downstream of that target -- the IK solver and the visualizer.
-No physics backend: the "robot" is the kinematic model, so its state is whatever the
-IK returned, exactly as in the placo simulation path.
+The base controller owns the XR input path and the SWGR retargeting, and writes a 4x4
+world target per manipulator. This class supplies everything downstream of that
+target: the IK solver and the visualizer. No physics backend -- the "robot" is the
+kinematic model, so its state is whatever the IK returned.
 """
 
 import gc
@@ -51,7 +50,7 @@ def blend_se3(T_from: np.ndarray, T_to: np.ndarray, alpha: float) -> np.ndarray:
 
 
 class _Task:
-    """Stands in for a placo task: the base controller writes the retargeted target here."""
+    """Per-manipulator target slot; the base controller writes the retargeted target here."""
 
     def __init__(self, T_world_frame: np.ndarray):
         self.T_world_frame = np.array(T_world_frame, dtype=float)
@@ -59,10 +58,10 @@ class _Task:
 
 
 class _Kinematics:
-    """Stands in for ``placo.RobotWrapper`` so the base IK loop runs unchanged.
+    """The ``self.kinematics`` handle the base IK loop requires.
 
-    Only what :meth:`BaseTeleopController._update_ik` touches is implemented:
-    ``state.q`` and ``update_kinematics()``.
+    Implements exactly the three members :meth:`BaseTeleopController._update_ik` and
+    this controller touch: ``state.q``, ``update_kinematics()`` and ``frame(name)``.
     """
 
     def __init__(self, ik: DualArmCasadiIK):
@@ -90,7 +89,6 @@ class CasadiTeleopController(BaseTeleopController):
         filter_weights: Sequence[float] = FILTER_WEIGHTS,
         frequency: float = DEFAULT_FREQUENCY,
         engage_ramp_time: float = DEFAULT_ENGAGE_RAMP_TIME,
-        scale_factor: float = 1.0,
         R_headset_world=R_HEADSET_TO_WORLD,
         open_browser: bool = True,
     ):
@@ -126,15 +124,7 @@ class CasadiTeleopController(BaseTeleopController):
         # Per-cycle IPOPT wall time in ms, drained by _tracking_report every status tick.
         self._solve_ms: list = []
 
-        super().__init__(
-            robot_urdf_path,
-            manipulator_config,
-            False,  # floating_base: the K1 is fixed base and so is the casadi model
-            R_headset_world,
-            scale_factor,
-            q_init,
-            1.0 / frequency,
-        )
+        super().__init__(robot_urdf_path, manipulator_config, R_headset_world, q_init, 1.0 / frequency)
         self._init_viz()
 
     # ------------------------------------------------------------- solver setup
@@ -151,15 +141,14 @@ class CasadiTeleopController(BaseTeleopController):
             reg_cost_weight=self.reg_cost_weight,
             filter_weights=self.filter_weights,
         )
-        self.placo_robot = _Kinematics(self.arm_ik)
-        self.motion_tracker_task = {}
+        self.kinematics = _Kinematics(self.arm_ik)
         print("Joint names in the CasADi/Pinocchio model:")
         for name in self.arm_ik.model.names[1:]:
             print(f"  {name}")
 
         for name, config in self.manipulator_config.items():
             self.effector_control_mode[name] = config.get("control_mode", "pose")
-            self.effector_task[name] = _Task(self.placo_robot.frame(config["link_name"]))
+            self.effector_task[name] = _Task(self.kinematics.frame(config["link_name"]))
             print(f"Created {self.effector_control_mode[name]} task for {name} -> {config['link_name']}")
 
     # ------------------------------------------------------------------ state
@@ -167,7 +156,7 @@ class CasadiTeleopController(BaseTeleopController):
         pass  # state is whatever the last IK returned; _solve_ik publishes it
 
     def _get_link_pose(self, link_name):
-        T = self.placo_robot.frame(link_name)
+        T = self.kinematics.frame(link_name)
         return T[:3, 3].copy(), tf.quaternion_from_matrix(T)
 
     def _solve_ik(self):
@@ -181,19 +170,19 @@ class CasadiTeleopController(BaseTeleopController):
         # ramp/FK bookkeeping around it.
         t_solve = time.perf_counter()
         q, _ = self.arm_ik.solve_ik(
-            targets[self.left_frame], targets[self.right_frame], q_meas=self.placo_robot.state.q
+            targets[self.left_frame], targets[self.right_frame], q_meas=self.kinematics.state.q
         )
         self._solve_ms.append((time.perf_counter() - t_solve) * 1e3)
         self.q_cmd = q
-        self.placo_robot.state.q = q
-        self.placo_robot.update_kinematics()
+        self.kinematics.state.q = q
+        self.kinematics.update_kinematics()
 
     # ---------------------------------------------------------- target handling
     def _task_target(self, name: str) -> np.ndarray:
         """The 4x4 target the retargeting layer wrote, in both control modes."""
         task = self.effector_task[name]
         if self.effector_control_mode[name] == "position":
-            T = self.placo_robot.frame(self.manipulator_config[name]["link_name"]).copy()
+            T = self.kinematics.frame(self.manipulator_config[name]["link_name"]).copy()
             T[:3, 3] = task.target_world  # hold current orientation
             return T
         return np.asarray(task.T_world_frame, dtype=float)
@@ -211,7 +200,7 @@ class CasadiTeleopController(BaseTeleopController):
         link = self.manipulator_config[name]["link_name"]
         active = bool(self.active[name])
         if active and not self._engaged.get(name, False):
-            self._ramp_from[name] = self.placo_robot.frame(link).copy()
+            self._ramp_from[name] = self.kinematics.frame(link).copy()
             self._ramp_left[name] = self.engage_ramp_time
         self._engaged[name] = active
         remaining = self._ramp_left.get(name, 0.0)
@@ -236,11 +225,11 @@ class CasadiTeleopController(BaseTeleopController):
                 mgeom.Sphere(0.012),
                 mgeom.MeshLambertMaterial(color=TARGET_COLORS[side], opacity=0.85),
             )
-        self.viz.display(self.placo_robot.state.q)
+        self.viz.display(self.kinematics.state.q)
         print(f"[casadi] meshcat: {self.viz.viewer.url()}")
 
     def _update_viz(self):
-        self.viz.display(self.placo_robot.state.q)
+        self.viz.display(self.kinematics.state.q)
         for frame, target in self._last_targets.items():
             self.viz.viewer[f"target/{frame}"].set_transform(target)
 
@@ -280,7 +269,7 @@ class CasadiTeleopController(BaseTeleopController):
         parts = []
         for frame, target in self._last_targets.items():
             name = self._frame_to_manipulator[frame]
-            err = np.linalg.norm(self.placo_robot.frame(frame)[:3, 3] - target[:3, 3])
+            err = np.linalg.norm(self.kinematics.frame(frame)[:3, 3] - target[:3, 3])
             parts.append(f"{frame} pos_err={err * 1000:5.1f}mm engaged={self._engaged.get(name, False)}")
         if self._solve_ms:
             # mean and max over the status window, not the last cycle: a single sample

@@ -67,18 +67,17 @@ JAKA_K1_MANIPULATOR_CONFIG = {
 
 def main(
     robot_urdf_path: str = JAKA_K1_URDF_PATH,
-    scale_factor: float = 1.0,  # unused by SWGR arms, which derive their own scale
     smooth_cost_weight: float = SMOOTH_COST_WEIGHT,
     frequency: float = DEFAULT_FREQUENCY,
     engage_ramp_time: float = DEFAULT_ENGAGE_RAMP_TIME,
 ):
     """Run JAKA K1 dual-arm teleoperation with the xr_teleoperate CasADi/IPOPT optimizer.
 
-    End-effector poses are retargeted with Shoulder-Wrist Geometric Retargeting (SWGR),
-    unchanged from the placo script: the operator's shoulder->wrist vector is scaled by
-    robot_reach / human_reach and anchored at the robot shoulder, so the mapping is
-    absolute and needs no re-anchoring. Requires XR body tracking (Pico Swift trackers)
-    plus a controller for orientation.
+    End-effector poses are retargeted with Shoulder-Wrist Geometric Retargeting (SWGR):
+    the operator's shoulder->wrist vector is scaled by robot_reach / human_reach and
+    anchored at the robot shoulder, so the mapping is absolute and needs no
+    re-anchoring. Requires XR body tracking (Pico Swift trackers) plus a controller for
+    orientation.
 
     Downstream of the retargeted target the IK is the one from unitreerobotics/
     xr_teleoperate: IPOPT over a pinocchio-casadi model, trading EE pose error against
@@ -86,8 +85,8 @@ def main(
     ``smooth_cost_weight`` (upstream 0.1) is the knob that trades tracking accuracy for
     smoothness -- raise it for calmer motion, lower it for tighter tracking.
 
-    The placo script's 1e-4 joints task toward Q_INIT is the ``reg_cost_weight`` term
-    here (upstream weight 0.02, centred on Q_INIT).
+    The 1e-4 joints task toward Q_INIT is the ``reg_cost_weight`` term here (upstream
+    weight 0.02, centred on Q_INIT).
     """
     controller = CasadiTeleopController(
         robot_urdf_path=robot_urdf_path,
@@ -95,7 +94,6 @@ def main(
         q_init=JAKA_K1_Q_INIT,
         left_frame="lt",
         right_frame="rt",
-        scale_factor=scale_factor,
         smooth_cost_weight=smooth_cost_weight,
         frequency=frequency,
         engage_ramp_time=engage_ramp_time,
