@@ -42,67 +42,6 @@ class XrClient:
                 f"Invalid name: {name}. Valid names are: 'left_trigger', 'right_trigger', 'left_grip', 'right_grip'."
             )
 
-    def get_button_state_by_name(self, name: str) -> bool:
-        """Returns the button state by name (bool).
-        Valid names: "A", "B", "X", "Y",
-                      "left_menu_button", "right_menu_button",
-                      "left_axis_click", "right_axis_click"
-        """
-        if name == "A":
-            return xrt.get_A_button()
-        elif name == "B":
-            return xrt.get_B_button()
-        elif name == "X":
-            return xrt.get_X_button()
-        elif name == "Y":
-            return xrt.get_Y_button()
-        elif name == "left_menu_button":
-            return xrt.get_left_menu_button()
-        elif name == "right_menu_button":
-            return xrt.get_right_menu_button()
-        elif name == "left_axis_click":
-            return xrt.get_left_axis_click()
-        elif name == "right_axis_click":
-            return xrt.get_right_axis_click()
-        else:
-            raise ValueError(
-                f"Invalid name: {name}. Valid names are: 'A', 'B', 'X', 'Y', "
-                "'left_menu_button', 'right_menu_button', 'left_axis_click', 'right_axis_click'."
-            )
-
-    def get_timestamp_ns(self) -> int:
-        """Returns the current timestamp in nanoseconds (int)."""
-        return xrt.get_time_stamp_ns()
-
-    def get_hand_tracking_state(self, hand: str) -> np.ndarray | None:
-        """Returns the hand tracking state for the specified hand.
-        Valid hands: "left", "right".
-        State is a 27 x 7 numpy array, where each row is [x, y, z, qx, qy, qz, qw] for each joint.
-        Returns None if hand tracking is inactive (low quality).
-        """
-        if hand.lower() == "left":
-            if not xrt.get_left_hand_is_active():
-                return None
-            return xrt.get_left_hand_tracking_state()
-        elif hand.lower() == "right":
-            if not xrt.get_right_hand_is_active():
-                return None
-            return xrt.get_right_hand_tracking_state()
-        else:
-            raise ValueError(f"Invalid hand: {hand}. Valid hands are: 'left', 'right'.")
-
-    def get_joystick_state(self, controller: str) -> list[float]:
-        """Returns the joystick state for the specified controller.
-        Valid controllers: "left", "right".
-        State is a list with shape (2) representing [x, y] for each joystick.
-        """
-        if controller.lower() == "left":
-            return xrt.get_left_axis()
-        elif controller.lower() == "right":
-            return xrt.get_right_axis()
-        else:
-            raise ValueError(f"Invalid controller: {controller}. Valid controllers are: 'left', 'right'.")
-
     def get_body_tracking_data(self) -> dict | None:
         """Returns body joint poses, or None if unavailable.
 
