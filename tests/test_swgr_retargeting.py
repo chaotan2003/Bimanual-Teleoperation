@@ -12,25 +12,35 @@ import unittest
 
 import meshcat.transformations as tf
 import numpy as np
-import pinocchio as pin
+import yourdfpy
 
-from scripts.simulation.teleop_jaka_k1_casadi import (
+from bimanual_teleop.kinematics_backend import Robot
+from bimanual_teleop.robots.jaka_k1 import (
     HUMAN_REACH,
     JAKA_K1_MANIPULATOR_CONFIG,
     JAKA_K1_Q_INIT,
     JAKA_K1_REACH,
     JAKA_K1_URDF_PATH,
 )
-from xrobotoolkit_teleop.common.base_teleop_controller import BaseTeleopController
-from xrobotoolkit_teleop.utils.geometry import R_HEADSET_TO_WORLD, swgr_ee_position
+from bimanual_teleop.core.teleop_controller import BaseTeleopController
+from bimanual_teleop.retargeting.swgr import (
+    R_HEADSET_TO_WORLD,
+    adaptive_elbow_weight,
+    elbow_axis_direction,
+    swgr_ee_position,
+)
 
 
 def _fk(q):
     """Frame name -> 4x4 world transform for the JAKA K1 at joint configuration q."""
-    model = pin.buildModelFromUrdf(JAKA_K1_URDF_PATH)
-    data = model.createData()
-    pin.framesForwardKinematics(model, data, np.asarray(q, dtype=float))
-    return {f.name: data.oMf[i].homogeneous.copy() for i, f in enumerate(model.frames)}
+    robot = Robot.from_urdf(yourdfpy.URDF.load(JAKA_K1_URDF_PATH))
+    poses = np.asarray(robot.forward_kinematics(np.asarray(q, dtype=float)))
+    frames = {}
+    for name, pose in zip(robot.links.names, poses, strict=True):
+        T = tf.quaternion_matrix(pose[:4])
+        T[:3, 3] = pose[4:]
+        frames[name] = T
+    return frames
 
 SHOULDER_ROBOT = np.array([0.0, 0.2225, 0.217])  # JAKA K1 left shoulder (l2) in world
 SCALE = JAKA_K1_REACH / HUMAN_REACH
@@ -97,6 +107,28 @@ class SwgrRetargetingTest(unittest.TestCase):
         for name, config in JAKA_K1_MANIPULATOR_CONFIG.items():
             swgr = config["swgr"]
             self.assertAlmostEqual(swgr["robot_reach"] / swgr["human_reach"], SCALE, places=9, msg=name)
+
+    def test_elbow_direction_turns_off_when_arm_is_straight(self):
+        shoulder = np.array([0.0, 0.0, 0.0])
+        elbow = np.array([0.2, 0.0, 0.0])
+        wrist = np.array([0.4, 0.0, 0.0])
+
+        direction, radius = elbow_axis_direction(shoulder, elbow, wrist)
+
+        self.assertIsNone(direction)
+        self.assertEqual(radius, 0.0)
+        self.assertEqual(adaptive_elbow_weight(radius, HUMAN_REACH), 0.0)
+
+    def test_elbow_direction_is_perpendicular_to_shoulder_wrist_axis(self):
+        shoulder = np.array([0.0, 0.0, 0.0])
+        wrist = np.array([1.0, 0.0, 0.0])
+        elbow = np.array([0.5, 0.2, 0.0])
+
+        direction, radius = elbow_axis_direction(shoulder, elbow, wrist)
+
+        np.testing.assert_allclose(direction, [0.0, 1.0, 0.0], atol=1e-12)
+        self.assertAlmostEqual(radius, 0.2)
+        self.assertGreater(adaptive_elbow_weight(radius, HUMAN_REACH), 0.0)
 
 
 class JakaK1ReachTest(unittest.TestCase):
@@ -186,6 +218,11 @@ class SwgrControllerPathTest(unittest.TestCase):
         ctrl.swgr_scale = {"left_hand": SCALE}
         ctrl.swgr_rot_offset = {"left_hand": np.eye(3)}
         ctrl.swgr_elbow = {}
+        ctrl.swgr_elbow_direction = {}
+        ctrl.swgr_elbow_weight = {}
+        ctrl._swgr_elbow_direction_filtered = {}
+        ctrl._swgr_elbow_weight_filtered = {}
+        ctrl._grip_active = {"left_hand": False}
         ctrl.ref_ee_xyz = {"left_hand": self.REF_XYZ.copy()}
         ctrl.effector_control_mode = {"left_hand": "pose"}
         ctrl.effector_task = {"left_hand": _Task()}
@@ -217,6 +254,32 @@ class SwgrControllerPathTest(unittest.TestCase):
         limb = self.LIMBS["left"]
         expected = swgr_ee_position(SHOULDER_ROBOT, limb["shoulder"], limb["elbow"], SCALE, R_HEADSET_TO_WORLD)
         np.testing.assert_allclose(ctrl.swgr_elbow["left_hand"], expected, atol=1e-12)
+
+    def test_elbow_direction_and_weight_are_collected_for_aeac(self):
+        ctrl = self.build()
+        ctrl._update_swgr_target("left_hand", self.LEFT_CONFIG, self.LIMBS)
+
+        limb = self.LIMBS["left"]
+        n_h, r_h = elbow_axis_direction(limb["shoulder"], limb["elbow"], limb["wrist"])
+        np.testing.assert_allclose(ctrl.swgr_elbow_direction["left_hand"], R_HEADSET_TO_WORLD @ n_h, atol=1e-12)
+        self.assertAlmostEqual(ctrl.swgr_elbow_weight["left_hand"], adaptive_elbow_weight(r_h, HUMAN_REACH))
+
+    def test_elbow_direction_filter_smooths_after_first_sample(self):
+        ctrl = self.build()
+        ctrl.elbow_filter_alpha = 0.5
+        ctrl._set_elbow_constraint("left_hand", np.array([1.0, 0.0, 0.0]), 1.0)
+        ctrl._set_elbow_constraint("left_hand", np.array([0.0, 1.0, 0.0]), 0.2)
+
+        expected = np.array([1.0, 1.0, 0.0]) / np.sqrt(2.0)
+        np.testing.assert_allclose(ctrl.swgr_elbow_direction["left_hand"], expected, atol=1e-12)
+        self.assertAlmostEqual(ctrl.swgr_elbow_weight["left_hand"], 0.6)
+
+    def test_grip_activation_has_hysteresis(self):
+        ctrl = self.build()
+        self.assertFalse(ctrl._grip_is_active("left_hand", 0.85))
+        self.assertTrue(ctrl._grip_is_active("left_hand", 0.95))
+        self.assertTrue(ctrl._grip_is_active("left_hand", 0.80))
+        self.assertFalse(ctrl._grip_is_active("left_hand", 0.70))
 
 
 if __name__ == "__main__":

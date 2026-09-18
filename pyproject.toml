@@ -3,23 +3,22 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "xrobotoolkit_teleop"
+name = "bimanual_teleop"
 version = "2.0.0"
-description = "XR teleoperation of a dual-arm JAKA K1 with a CasADi/IPOPT inverse kinematics solver"
+description = "XR teleoperation of a dual-arm JAKA K1 with SWGR, AEAC and J-PARSE IK"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "Zhigen", email = "zhaozhigen@gmail.com"}
 ]
-# pinocchio is deliberately NOT listed here: the CasADi IK needs the conda-forge build
-# (pinocchio 3.1.0 + eigenpy) that ships the SX-only `pinocchio.casadi` bindings. The
-# PyPI sdist does not. setup_conda.sh installs it from conda-forge.
 dependencies = [
-    "casadi>=3.6",
     "numpy",
     "meshcat",
+    "pyroki @ git+https://github.com/chungmin99/pyroki.git",
     "tyro",
+    "viser",
+    "yourdfpy",
 ]
 
 [project.optional-dependencies]
@@ -28,10 +27,10 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["xrobotoolkit_teleop*"]
+include = ["bimanual_teleop*"]
 
 [tool.setuptools.package-data]
-xrobotoolkit_teleop = ["../assets/**/*"]
+bimanual_teleop = ["../assets/**/*"]
 
 [tool.black]
 line-length = 120

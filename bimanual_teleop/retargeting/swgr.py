@@ -34,3 +34,29 @@ def swgr_ee_position(
         Target end-effector position in the robot world frame. Shape (3,).
     """
     return shoulder_robot + scale * (R_world_vr @ (wrist_human - shoulder_human))
+
+
+def elbow_axis_direction(
+    shoulder: np.ndarray,
+    elbow: np.ndarray,
+    wrist: np.ndarray,
+    eps: float = 1e-6,
+) -> tuple[np.ndarray | None, float]:
+    shoulder = np.asarray(shoulder, dtype=float)
+    elbow = np.asarray(elbow, dtype=float)
+    wrist = np.asarray(wrist, dtype=float)
+    axis = wrist - shoulder
+    axis_norm = float(np.linalg.norm(axis))
+    if axis_norm < eps:
+        return None, 0.0
+    d = axis / axis_norm
+    v = elbow - (shoulder + d * np.dot(d, elbow - shoulder))
+    radius = float(np.linalg.norm(v))
+    if radius < eps:
+        return None, radius
+    return v / radius, radius
+
+
+def adaptive_elbow_weight(radius: float, reach: float, deadband: float = 0.04) -> float:
+    denom = max(float(reach) - float(deadband), 1e-6)
+    return float(np.clip((float(radius) - float(deadband)) / denom, 0.0, 1.0))

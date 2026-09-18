@@ -6,13 +6,13 @@ from typing import Any, Dict
 import meshcat.transformations as tf
 import numpy as np
 
-from xrobotoolkit_teleop.common.xr_client import XrClient
-from xrobotoolkit_teleop.utils.geometry import swgr_ee_position
+from bimanual_teleop.io.xr_client import XrClient
+from bimanual_teleop.retargeting.swgr import adaptive_elbow_weight, elbow_axis_direction, swgr_ee_position
 
 
 # XRoboToolkit body tracking joint indices (SMPL-like, 24 joints).
-# Only the upper-limb keypoints are used; SWGR end-effector retargeting consumes
-# shoulder + wrist, and the elbow is captured but deliberately unused.
+# Only the upper-limb keypoints are used; SWGR consumes shoulder + wrist for the
+# tool target, and AEAC uses the elbow direction as a nullspace preference.
 BODY_JOINT_INDEX = {
     "left": {"shoulder": 16, "elbow": 18, "wrist": 20},
     "right": {"shoulder": 17, "elbow": 19, "wrist": 21},
@@ -25,7 +25,7 @@ class BaseTeleopController(abc.ABC):
     Backend-agnostic. A subclass supplies three things: the kinematics handle
     ``self.kinematics`` (``state.q``, ``update_kinematics()``, ``frame(name)``), the
     per-manipulator target objects in ``self.effector_task``, and ``_solve_ik``.
-    See ``simulation/casadi_teleop_controller.py``.
+    See ``runtime/viser_jparse_controller.py``.
     """
 
     def __init__(
@@ -57,7 +57,12 @@ class BaseTeleopController(abc.ABC):
             raise ValueError(f"manipulator_config entries without an 'swgr' block: {missing}")
         self.swgr_scale = {}  # robot_reach / human_reach per end effector
         self.swgr_rot_offset = {}  # constant controller->tool rotation offset per end effector
-        self.swgr_elbow = {}  # retargeted elbow position, collected but not used by IK
+        self.swgr_elbow = {}  # retargeted elbow position, collected for visualization/debugging
+        self.swgr_elbow_direction = {}
+        self.swgr_elbow_weight = {}
+        self._swgr_elbow_direction_filtered = {}
+        self._swgr_elbow_weight_filtered = {}
+        self._grip_active = {name: False for name in manipulator_config}
         self._body_sanity_checked = False
         self._body_warn_t0 = 0.0  # throttles the "body tracking unavailable" warning
         for name, config in manipulator_config.items():
@@ -106,6 +111,36 @@ class BaseTeleopController(abc.ABC):
 
         return limbs
 
+    def _grip_is_active(self, name: str, value: float) -> bool:
+        if self._grip_active[name]:
+            self._grip_active[name] = value > getattr(self, "grip_off_threshold", 0.75)
+        else:
+            self._grip_active[name] = value > getattr(self, "grip_on_threshold", 0.9)
+        return self._grip_active[name]
+
+    def _set_elbow_constraint(self, name: str, direction, weight: float) -> None:
+        if direction is None or weight <= 0.0:
+            self.swgr_elbow_direction[name] = None
+            self.swgr_elbow_weight[name] = 0.0
+            self._swgr_elbow_direction_filtered.pop(name, None)
+            self._swgr_elbow_weight_filtered.pop(name, None)
+            return
+
+        alpha = float(getattr(self, "elbow_filter_alpha", 0.35))
+        direction = np.asarray(direction, dtype=float)
+        direction = direction / max(float(np.linalg.norm(direction)), 1e-9)
+        previous = self._swgr_elbow_direction_filtered.get(name)
+        if previous is not None:
+            direction = (1.0 - alpha) * previous + alpha * direction
+            direction = direction / max(float(np.linalg.norm(direction)), 1e-9)
+
+        previous_weight = self._swgr_elbow_weight_filtered.get(name, float(weight))
+        weight = (1.0 - alpha) * previous_weight + alpha * float(weight)
+        self._swgr_elbow_direction_filtered[name] = direction
+        self._swgr_elbow_weight_filtered[name] = weight
+        self.swgr_elbow_direction[name] = direction
+        self.swgr_elbow_weight[name] = weight
+
     def _update_swgr_target(self, src_name, config, limbs):
         """Sets the end-effector task target by absolute shoulder-wrist geometric retargeting.
 
@@ -131,8 +166,8 @@ class BaseTeleopController(abc.ABC):
         controller_quat = [xr_pose[6], xr_pose[3], xr_pose[4], xr_pose[5]]  # (w, x, y, z)
         R_target = self.R_headset_world @ tf.quaternion_matrix(controller_quat)[:3, :3] @ self.swgr_rot_offset[src_name]
 
-        # Elbow is retargeted with the same geometry for logging only; SWGR deliberately
-        # does not feed it to the IK, so the shoulder-wrist relation stays the sole driver.
+        # Elbow position is kept for visualization/debugging; AEAC below uses only the
+        # elbow direction, so the SWGR end-effector target remains shoulder-wrist based.
         self.swgr_elbow[src_name] = swgr_ee_position(
             shoulder_robot,
             limb["shoulder"],
@@ -140,6 +175,20 @@ class BaseTeleopController(abc.ABC):
             self.swgr_scale[src_name],
             self.R_headset_world,
         )
+        n_h, r_h = elbow_axis_direction(limb["shoulder"], limb["elbow"], limb["wrist"])
+        if n_h is None:
+            self._set_elbow_constraint(src_name, None, 0.0)
+        else:
+            self._set_elbow_constraint(
+                src_name,
+                self.R_headset_world @ n_h,
+                adaptive_elbow_weight(
+                    r_h,
+                    swgr["human_reach"],
+                    getattr(self, "elbow_deadband", 0.04),
+                )
+                * getattr(self, "elbow_weight_max", 1.0),
+            )
 
         if self.effector_control_mode[src_name] == "position":
             self.effector_task[src_name].target_world = target_xyz
@@ -159,7 +208,7 @@ class BaseTeleopController(abc.ABC):
 
         for src_name, config in self.manipulator_config.items():
             xr_grip_val = self.xr_client.get_key_value_by_name(config["control_trigger"])
-            self.active[src_name] = xr_grip_val > 0.9
+            self.active[src_name] = self._grip_is_active(src_name, xr_grip_val)
 
             if self.active[src_name]:
                 if self.ref_ee_xyz[src_name] is None:
@@ -173,15 +222,14 @@ class BaseTeleopController(abc.ABC):
                         print(
                             f"[SWGR] body tracking unavailable, {src_name} holds its last target. "
                             "Check: PICO headset connected, Full Body Tracking mode enabled in the "
-                            "Unity app, at least two Pico Swift trackers connected and calibrated. "
-                            "Probe with dependencies/XRoboToolkit-PC-Service-Pybind/examples/"
-                            "example_body_tracking.py"
+                            "Unity app, at least two Pico Swift trackers connected and calibrated."
                         )
                 else:
                     self._update_swgr_target(src_name, config, body_limbs)
             elif self.ref_ee_xyz[src_name] is not None:
                 print(f"{src_name} is deactivated.")
                 self.ref_ee_xyz[src_name] = None
+                self._set_elbow_constraint(src_name, None, 0.0)
 
         try:
             self._solve_ik()

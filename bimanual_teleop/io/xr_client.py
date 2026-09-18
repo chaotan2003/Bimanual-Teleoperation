@@ -1,5 +1,4 @@
 import numpy as np
-import xrobotoolkit_sdk as xrt
 
 
 class XrClient:
@@ -7,6 +6,9 @@ class XrClient:
 
     def __init__(self):
         """Initializes the XrClient and the SDK."""
+        import xrobotoolkit_sdk as xrt
+
+        self._xrt = xrt
         xrt.init()
         print("XRoboToolkit SDK initialized.")
 
@@ -14,6 +16,7 @@ class XrClient:
         """Returns the pose of the specified device by name.
         Valid names: "left_controller", "right_controller", "headset".
         Pose is [x, y, z, qx, qy, qz, qw]."""
+        xrt = self._xrt
         if name == "left_controller":
             return xrt.get_left_controller_pose()
         elif name == "right_controller":
@@ -29,6 +32,7 @@ class XrClient:
         """Returns the trigger/grip value by name (float).
         Valid names: "left_trigger", "right_trigger", "left_grip", "right_grip".
         """
+        xrt = self._xrt
         if name == "left_trigger":
             return xrt.get_left_trigger()
         elif name == "right_trigger":
@@ -53,10 +57,11 @@ class XrClient:
         and each xrt.get_* is a pybind11 round-trip to the PICO PC Service on the teleop
         hot path. Add them back here if a caller ever needs them.
         """
+        xrt = self._xrt
         if not xrt.is_body_data_available():
             return None
 
         return {"poses": xrt.get_body_joints_pose()}
 
     def close(self):
-        xrt.close()
+        self._xrt.close()

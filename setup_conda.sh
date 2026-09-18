@@ -97,10 +97,6 @@ elif [[ "$1" == "--install" ]]; then
     pip install uv
     uv pip install --upgrade pip
 
-    # pinocchio + casadi must come from conda-forge: the IK solver uses the SX-only
-    # `pinocchio.casadi` bindings, which the PyPI sdist does not ship.
-    conda install -c conda-forge pinocchio casadi -y
-
     # Install the required packages
     rm -rf dependencies
     mkdir dependencies
@@ -112,10 +108,10 @@ elif [[ "$1" == "--install" ]]; then
 
     cd ../..
 
-    uv pip install -e . || { echo "Failed to install xrobotoolkit_teleop with pip"; exit 1; }
+    uv pip install -e . || { echo "Failed to install bimanual_teleop with pip"; exit 1; }
 
     echo -e "\n"
-    echo -e "[INFO] xrobotoolkit_teleop is installed in conda environment '$ENV_NAME'.\n"
+    echo -e "[INFO] bimanual_teleop is installed in conda environment '$ENV_NAME'.\n"
     echo -e "\n"
 else
     echo "Invalid argument. Use --conda to create a conda environment or --install to install the package."
