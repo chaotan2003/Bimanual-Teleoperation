@@ -102,9 +102,10 @@ elif [[ "$1" == "--install" ]]; then
     mkdir dependencies
     cd dependencies
 
-    git clone https://github.com/XR-Robotics/XRoboToolkit-PC-Service-Pybind.git
+    git clone --depth 1 https://github.com/XR-Robotics/XRoboToolkit-PC-Service-Pybind.git
     cd XRoboToolkit-PC-Service-Pybind
     bash setup_ubuntu.sh
+    rm -rf tmp build *.egg-info .git
 
     cd ../..
 

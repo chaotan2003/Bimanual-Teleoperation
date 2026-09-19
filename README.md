@@ -2,6 +2,10 @@
 
 [中文说明](README.zh-CN.md)
 
+<p align="center">
+  <img src="doc/figure.gif" width="680" alt="Same Wrist Target: Wrist-Only vs Ours vs Real-World">
+</p>
+
 PICO teleoperation of a dual-arm JAKA K1. The runtime path is intentionally small:
 XR body/controller input -> SWGR target retargeting -> AEAC elbow preference ->
 stacked J-PARSE velocity IK -> Viser visualization. There is no physics backend and no

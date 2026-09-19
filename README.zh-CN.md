@@ -42,6 +42,9 @@ bash setup_conda.sh --install
 模式安装本项目。`xrobotoolkit_sdk` 只用于从 PICO/XRoboToolkit 获取输入数据；
 IK 的运动学模型由外部 git 依赖提供。
 
+`dependencies/` 是外部 SDK 的本地安装目录，已在 `.gitignore` 中忽略，不属于本项目源码。
+如果只准备提交代码，可以删除它；重新运行 `bash setup_conda.sh --install` 会重新生成。
+
 验证安装：
 
 ```bash
